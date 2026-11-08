@@ -53,7 +53,7 @@ impl Default for ScreenUi {
 			quality_for: None,
 			fps: 30,
 			cursor: true,
-			audio: cfg!(target_os = "macos"),
+			audio: cfg!(any(target_os = "macos", target_os = "linux")),
 		}
 	}
 }
