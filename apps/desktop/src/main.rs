@@ -618,7 +618,7 @@ fn main() -> eframe::Result {
 		..Default::default()
 	};
 	let result = eframe::run_native(
-		"Serein",
+		"Discorust",
 		options,
 		Box::new(move |cc| {
 			let mut desktop =

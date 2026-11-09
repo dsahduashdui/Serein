@@ -54,7 +54,7 @@ impl Tray {
 		let worker_events = events.clone();
 		runtime.spawn(async move {
 			let Ok(icon) = image::load_from_memory_with_format(
-				include_bytes!("../../../../assets/brand/serein-tray.png"),
+				include_bytes!("../../../../assets/brand/discorust-tray.png"),
 				image::ImageFormat::Png,
 			) else {
 				worker_events.push(Event::Unavailable);
@@ -158,7 +158,7 @@ fn write_symbolic_icon() -> Option<String> {
 		.create(&directory)
 		.ok()?;
 	// Symbolic icons are recolored from this placeholder foreground.
-	let svg = include_str!("../../../../assets/brand/serein-mark.svg")
+	let svg = include_str!("../../../../assets/brand/discorust-mark.svg")
 		.replace("fill=\"#fff\"", "fill=\"#bebebe\"");
 	std::fs::write(directory.join(format!("{ICON_NAME}.svg")), svg).ok()?;
 	directory.to_str().map(str::to_owned)
@@ -176,7 +176,7 @@ impl ksni::Tray for Item {
 		"serein".into()
 	}
 	fn title(&self) -> String {
-		"Serein".into()
+		"Discorust".into()
 	}
 	fn icon_name(&self) -> String {
 		// Without a theme path the name cannot resolve, so fall back to the pixmap only.

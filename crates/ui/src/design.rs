@@ -91,9 +91,11 @@ pub enum Variant {
 	Ember = 4,
 	Verdant = 5,
 	Afterglow = 6,
+	/// High-contrast monochrome: black surfaces, white type and a white accent.
+	Cyber = 7,
 }
 impl Variant {
-	pub const ALL: [Variant; 7] = [
+	pub const ALL: [Variant; 8] = [
 		Variant::Standard,
 		Variant::Eclipse,
 		Variant::Slate,
@@ -101,6 +103,7 @@ impl Variant {
 		Variant::Ember,
 		Variant::Verdant,
 		Variant::Afterglow,
+		Variant::Cyber,
 	];
 	pub fn label(self) -> &'static str {
 		match self {
@@ -111,6 +114,7 @@ impl Variant {
 			Variant::Ember => "Ember",
 			Variant::Verdant => "Verdant",
 			Variant::Afterglow => "Afterglow",
+			Variant::Cyber => "Cyber",
 		}
 	}
 	/// Stable identifier for persistence.
@@ -123,6 +127,7 @@ impl Variant {
 			Variant::Ember => "ember",
 			Variant::Verdant => "verdant",
 			Variant::Afterglow => "afterglow",
+			Variant::Cyber => "cyber",
 		}
 	}
 	/// Keys written by builds that shipped the previous theme names.
@@ -135,6 +140,7 @@ impl Variant {
 			Variant::Ember => "crimson-moon",
 			Variant::Verdant => "forest",
 			Variant::Afterglow => "sunset",
+			Variant::Cyber => "cyber",
 		}
 	}
 	pub fn from_key(key: &str) -> Option<Variant> {
@@ -386,6 +392,29 @@ pub fn builtin_colors(dark: bool, variant: Variant) -> Palette {
 		Variant::Ember => gradient([0x8c2340, 0x140609], 0x41262e),
 		Variant::Verdant => gradient([0x2b6350, 0x081a15], 0x283934),
 		Variant::Afterglow => gradient([0xd9663c, 0x35205e], 0x5b3b40),
+		Variant::Cyber => {
+			let mut palette = dark_common(
+				Color32::BLACK,
+				rgb(0x050505),
+				rgb(0x0a0a0a),
+				rgb(0x111111),
+				rgb(0x1a1a1a),
+				rgb(0x262626),
+				rgb(0x333333),
+			);
+			palette.text_strong = Color32::WHITE;
+			palette.text = rgb(0xd6d6d6);
+			palette.muted = rgb(0x8f8f8f);
+			palette.link = Color32::WHITE;
+			palette.accent = Color32::WHITE;
+			palette.accent_text = Color32::BLACK;
+			palette.positive = rgb(0xe8e8e8);
+			palette.warning = rgb(0xb8b8b8);
+			palette.danger = Color32::WHITE;
+			palette.mention_bg = rgba(0xffffff, 48);
+			palette.mention_text = Color32::WHITE;
+			palette
+		}
 	};
 	customize(palette, primary_color())
 }
@@ -1925,7 +1954,11 @@ mod tests {
 
 	#[test]
 	fn solid_badges_use_discord_red_unless_the_theme_changed_danger() {
-		for variant in Variant::ALL {
+		// Cyber is intentionally monochrome, so it carries its own white danger colour.
+		for variant in Variant::ALL
+			.into_iter()
+			.filter(|variant| *variant != Variant::Cyber)
+		{
 			let dark = builtin_colors(true, variant);
 			assert_eq!(dark.badge_fill(), BADGE_RED, "{variant:?}");
 			// Red text keeps its lighter, readable shade.
