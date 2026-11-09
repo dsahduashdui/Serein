@@ -12,6 +12,10 @@ use tokio::{runtime::Runtime, sync::watch, task::JoinHandle};
 use zeroize::Zeroizing;
 
 const SIGNAL_TIMEOUT: Duration = Duration::from_secs(30);
+/// A live view with no new picture for this long is restarted before the user notices.
+const STALL_TIMEOUT: Duration = Duration::from_secs(10);
+/// Consecutive automatic restarts without a single picture before reporting failure.
+const MAX_RESTARTS: u8 = 3;
 // Eight UHD YUV pictures plus the displayed picture fit without increasing the item bound.
 const DECODED_BUDGET: usize = 128 * 1024 * 1024;
 
@@ -144,6 +148,10 @@ pub(super) struct Watch {
 	ended: Option<(ui::design::Level, &'static str)>,
 	sequence: u64,
 	status: &'static str,
+	/// When the UI last uploaded a fresh picture; drives the stall watchdog.
+	last_picture: Option<Instant>,
+	/// Automatic restarts since the last picture.
+	restarts: u8,
 	/// GPU texture behind `ui.voice_stream_view`.
 	texture: crate::gpu_video::VideoTexture,
 }
@@ -255,6 +263,7 @@ impl Watch {
 						context.streamer,
 					))) {
 			self.stop();
+			self.restarts = 0;
 			self.status = "Stopped watching";
 			if context.generation == state.generation && !state.demo {
 				command = Some(Command::Voice(voice::Command::StopWatching {
@@ -267,6 +276,7 @@ impl Watch {
 		if let Some((level, message)) = self.ended.take() {
 			let context = self.context();
 			self.stop();
+			self.restarts = 0;
 			self.status = message;
 			// Said once; the stage keeps no line for a view that already ended.
 			ui.toasts.push(level, message);
@@ -373,11 +383,47 @@ impl Watch {
 				{
 					ui.voice_stream_view = Some(texture);
 					self.status = "Watching the stream";
+					self.last_picture = Some(Instant::now());
+					self.restarts = 0;
 				}
 			}
 		} else {
 			ui.voice_stream_view = None;
 			self.texture = Default::default();
+		}
+		// A silent stall produces no task error and no picture, so only elapsed time can
+		// reveal it. Restart the view before leaving the user with a frozen frame.
+		if self.live.is_some() {
+			ctx.request_repaint_after(Duration::from_millis(500));
+			let stalled = self
+				.last_picture
+				.is_some_and(|at| at.elapsed() >= STALL_TIMEOUT);
+			if stalled && self.ended.is_none() {
+				let context = self.live.as_ref().map(|live| live.context);
+				self.stop();
+				ui.voice_stream_view = None;
+				if self.restarts >= MAX_RESTARTS {
+					self.status = "The stream stopped responding";
+					self.ended = Some((
+						ui::design::Level::Warning,
+						"The stream stopped responding; try watching again",
+					));
+				} else {
+					self.restarts += 1;
+					self.status = "Reconnecting stream…";
+					self.last_picture = Some(Instant::now());
+					if let Some(context) = context
+						.filter(|context| context.generation == state.generation && !state.demo)
+					{
+						command = Some(Command::Voice(voice::Command::StopWatching {
+							channel: context.channel,
+							request: context.request,
+							stream_request: context.stream_request,
+						}));
+					}
+				}
+				ctx.request_repaint();
+			}
 		}
 		ui.voice_stream_status = if wanted.is_some() { self.status } else { "" };
 		command
@@ -443,6 +489,7 @@ impl Watch {
 			wake.request_repaint();
 		});
 		self.status = "Connecting to the stream…";
+		self.last_picture = Some(Instant::now());
 		self.live = Some(Live {
 			context: pending.context,
 			task,

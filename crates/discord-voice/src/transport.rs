@@ -1007,6 +1007,9 @@ const VIDEO_STALL: Duration = Duration::from_secs(1);
 /// watching, and sooner while video is stalled.
 const SINK_WANTS_INTERVAL: Duration = Duration::from_secs(5);
 const SINK_WANTS_STALLED_INTERVAL: Duration = Duration::from_secs(1);
+/// A stalled viewer re-announces its subscription so Discord can rebuild the forwarder even
+/// when the original sink wants were accepted but no video follows.
+const RESUBSCRIBE_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Validate a complete picture before either immediate camera decoding or watched-video
 /// pacing. DAVE and prediction-chain gates apply before plaintext enters the bounded queue.
@@ -1304,6 +1307,7 @@ async fn run_stream_inner(
 	let mut mixer = crate::stream_audio_receive::Audio::default();
 	let mut sync = crate::stream_sync::Sync::default();
 	let mut next_sink_wants = Instant::now();
+	let mut next_resubscribe = Instant::now();
 	let mut next_receive_report = Instant::now();
 	let mut next_transport_feedback = Instant::now();
 	let mut transport_feedback =
@@ -1549,9 +1553,11 @@ async fn run_stream_inner(
 					share_audio.is_some() || audio.is_some(),
 				], video.as_ref().and_then(|video|video.audio.as_ref()).map_or(0,|source|source.len()));
 				if let Some(audio)=&audio {
+					// Bound the audio jitter buffer only. Video keeps its own bounded playout:
+					// clearing it here discarded queued pictures (including the recovery
+					// keyframe) every 80 ms and left the decoder permanently waiting.
 					if now.saturating_duration_since(receive_tick)>=Duration::from_millis(80) {
-						mixer.clear();sync.clear();
-						if playout.clear() {receivers.require_all_keyframes();}
+						mixer.clear();
 					}
 					receive_tick=now;
 					if secure {
@@ -1605,6 +1611,16 @@ async fn run_stream_inner(
 					metrics.signal(Signal::SinkWantsSent,1);
 					next_sink_wants=now+if stalled {SINK_WANTS_STALLED_INTERVAL} else {SINK_WANTS_INTERVAL};
 				}
+				// Re-announce the subscription as well: a forwarder that accepted the first
+				// announcement can still stop sending, and sink wants alone may not rebuild it.
+				if secure && announced && video.is_none() && stalled && now>=next_resubscribe {
+					json_send(&mut ws,json!({"op":12,"d":{"audio_ssrc":audio_ssrc,"video_ssrc":0,"rtx_ssrc":0,"streams":[]}})).await?;
+					metrics.signal(Signal::SubscribeSent,1);
+					json_send(&mut ws,json!({"op":15,"d":{"any":100}})).await?;
+					metrics.signal(Signal::SinkWantsSent,1);
+					next_resubscribe=now+RESUBSCRIBE_INTERVAL;
+					next_sink_wants=now+SINK_WANTS_STALLED_INTERVAL;
+				}
 				if secure && announced && video.is_none() && now>=next_receive_report {
 					receive_reports.retain(|source| receivers.has_source(source));
 					let (header, body)=receive_reports.report(audio_ssrc,now.into_std());
@@ -1628,8 +1644,8 @@ async fn run_stream_inner(
 					metrics.video(Video::TwccDiscarded,transport_feedback.take_discarded());
 					next_transport_feedback=now+Duration::from_millis(100);
 				}
-				if secure && let Some(lost)=&lost && let Some(crypto)=encryption.as_mut() && let Some(socket)=&udp {
-					receivers.absorb(lost);
+				if secure && let Some(crypto)=encryption.as_mut() && let Some(socket)=&udp {
+					if let Some(lost)=&lost {receivers.absorb(lost);}
 					let requests=receivers.take_keyframe_requests(now.into_std());
 					metrics.video(Video::PliSent,requests.len() as u64);
 					for media in requests {let (header,body)=pli(audio_ssrc,media);udp_failures.send(socket,&crypto.seal_rtcp(&header,&body)?,"Stream RTCP send failed")?;}
