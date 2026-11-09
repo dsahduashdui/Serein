@@ -29,8 +29,6 @@ pub struct Updates {
 	/// Feedback for the copy button of the diagnostic log's recent lines.
 	pub copied_log: Option<f64>,
 	pub copied_command: Option<f64>,
-	/// Ready flag the sidebar banner was dismissed at, so a later stage prompts again.
-	pub banner_dismissed: Option<bool>,
 	/// Recent releases on the selected channel, newest first.
 	pub log: Vec<LogEntry>,
 }
@@ -53,106 +51,13 @@ impl Default for Updates {
 			copied_diagnostics: None,
 			copied_log: None,
 			copied_command: None,
-			banner_dismissed: None,
 			log: Vec::new(),
 		}
 	}
 }
 impl MessagingUi {
-	/// Whether the account card grows an update row, which it does only while Serein's own
-	/// title bar is hidden: the title-bar button is the only other place the prompt appears.
-	pub(super) fn shows_update_banner(&mut self) -> bool {
-		if self.shows_title_bar() {
-			return false;
-		}
-		if !self.updates.available && !self.updates.ready {
-			self.updates.banner_dismissed = None;
-			return false;
-		}
-		self.updates.banner_dismissed != Some(self.updates.ready)
-	}
-
-	/// Update prompt stacked into the account card, the way a call grows its own section.
-	/// Tinted with the accent colour (rather than plain link-coloured text on the card's flat
-	/// background) so it reads as a distinct, tappable banner instead of a stray line of text.
-	pub(super) fn update_banner(&mut self, ui: &mut egui::Ui) {
-		let ready = self.updates.ready;
-		let colors = design::palette(ui);
-		let (label, icon) = if ready {
-			(
-				"updates-shows-update-banner-restart-to-update",
-				icons::Icon::Reload,
-			)
-		} else if self.updates.busy {
-			(
-				"updates-shows-update-banner-updating",
-				icons::Icon::Download,
-			)
-		} else {
-			(
-				"updates-shows-update-banner-update-available",
-				icons::Icon::Download,
-			)
-		};
-		let label = crate::i18n::translate_if_key(label);
-		let status = self.updates.status.clone();
-		// Reserve the row and interact with it *before* the dismiss button below is added, so
-		// that button (registered after, "updates-shows-update-banner-on-top") keeps first claim on an overlapping click.
-		let (rect, response) =
-			ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::click());
-		let hovered = response.hovered() || response.has_focus();
-		ui.painter().rect_filled(
-			rect,
-			egui::CornerRadius {
-				nw: 8,
-				ne: 8,
-				sw: 0,
-				se: 0,
-			},
-			colors
-				.accent
-				.gamma_multiply(if hovered { 0.18 } else { 0.12 }),
-		);
-		let mut content = ui.new_child(
-			egui::UiBuilder::new()
-				.max_rect(rect.shrink2(egui::vec2(10.0, 0.0)))
-				.layout(egui::Layout::left_to_right(egui::Align::Center)),
-		);
-		let ui = &mut content;
-		ui.spacing_mut().item_spacing.x = 8.0;
-		let (mark, _) = ui.allocate_exact_size(egui::vec2(15.0, 15.0), egui::Sense::hover());
-		icons::paint(ui.painter(), icon, mark, colors.accent);
-		ui.add(
-			egui::Label::new(design::medium(ui, &label, 12.0).color(colors.accent))
-				.truncate()
-				.selectable(false),
-		);
-		let mut dismiss = false;
-		ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-			dismiss = icons::button(
-				ui,
-				icons::Icon::Close,
-				18.0,
-				&crate::i18n::translate("updates-update-banner-dismiss-update"),
-			)
-			.clicked();
-		});
-		response
-			.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), &label));
-		let open = !dismiss
-			&& response
-				.on_hover_text(crate::i18n::translate_if_key(&status))
-				.clicked();
-		if dismiss {
-			self.updates.banner_dismissed = Some(ready);
-		}
-		if open {
-			self.open_update_settings();
-		}
-	}
-
-	/// Gateway-recovery notice stacked into the account card, styled like the update banner but
-	/// tinted with the warning colour. The whole row requests an immediate reconnect.
+	/// Gateway-recovery notice stacked into the account card, styled as a tinted row that
+	/// reads as a distinct, tappable banner. The whole row requests an immediate reconnect.
 	pub(super) fn reconnecting_banner(&mut self, ui: &mut egui::Ui, first: bool) {
 		let colors = design::palette(ui);
 		let label = crate::i18n::translate("reconnecting");
@@ -712,127 +617,5 @@ impl MessagingUi {
 				});
 			}
 		});
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use crate::{MessagingUi, State};
-
-	/// Rectangles of the banner's text and icon shapes, in paint order.
-	fn scan(
-		ctx: &egui::Context,
-		view: &mut MessagingUi,
-		state: &mut State,
-	) -> (Vec<(String, egui::Rect)>, Vec<egui::Rect>) {
-		let output = ctx.run_ui(
-			egui::RawInput {
-				screen_rect: Some(egui::Rect::from_min_size(
-					egui::Pos2::ZERO,
-					egui::vec2(1200.0, 760.0),
-				)),
-				focused: true,
-				..Default::default()
-			},
-			|ui| {
-				view.show(ui, state);
-			},
-		);
-		let mut text = Vec::new();
-		let mut images = Vec::new();
-		fn walk(
-			shape: &egui::Shape,
-			text: &mut Vec<(String, egui::Rect)>,
-			images: &mut Vec<egui::Rect>,
-		) {
-			match shape {
-				egui::Shape::Text(shape) => text.push((
-					shape.galley.job.text.clone(),
-					egui::Rect::from_min_size(shape.pos, shape.galley.size()),
-				)),
-				egui::Shape::Mesh(mesh) => images.push(mesh.calc_bounds()),
-				egui::Shape::Vec(shapes) => {
-					for shape in shapes {
-						walk(shape, text, images);
-					}
-				}
-				_ => {}
-			}
-		}
-		for shape in &output.shapes {
-			walk(&shape.shape, &mut text, &mut images);
-		}
-		output.drop_without_applying_deltas();
-		(text, images)
-	}
-
-	fn banner(entries: &[(String, egui::Rect)]) -> Option<egui::Rect> {
-		entries
-			.iter()
-			.find(|(label, rect)| label == "Update available" && rect.top() > 100.0)
-			.map(|(_, rect)| *rect)
-	}
-
-	#[test]
-	fn dismissing_the_banner_hides_it_until_the_update_is_ready() {
-		let ctx = egui::Context::default();
-		crate::design::apply(&ctx);
-		let mut state = test_support::demo_state();
-		let mut view = MessagingUi {
-			hide_title_bar: true,
-			..Default::default()
-		};
-		view.updates.available = true;
-		scan(&ctx, &mut view, &mut state);
-		let (text, images) = scan(&ctx, &mut view, &mut state);
-		let prompt = banner(&text).expect("sidebar update prompt");
-		let close = images
-			.iter()
-			.filter(|rect| {
-				rect.width() < 24.0
-					&& rect.center().x < 400.0
-					&& (rect.center().y - prompt.center().y).abs() < 14.0
-			})
-			.max_by(|a, b| a.center().x.total_cmp(&b.center().x))
-			.copied()
-			.expect("dismiss button");
-		assert!(close.center().x > prompt.right(), "{close:?} {prompt:?}");
-		let click = |ctx: &egui::Context, view: &mut MessagingUi, state: &mut State, pos| {
-			for pressed in [true, false] {
-				let output = ctx.run_ui(
-					egui::RawInput {
-						screen_rect: Some(egui::Rect::from_min_size(
-							egui::Pos2::ZERO,
-							egui::vec2(1200.0, 760.0),
-						)),
-						focused: true,
-						events: vec![
-							egui::Event::PointerMoved(pos),
-							egui::Event::PointerButton {
-								pos,
-								button: egui::PointerButton::Primary,
-								pressed,
-								modifiers: egui::Modifiers::NONE,
-							},
-						],
-						..Default::default()
-					},
-					|ui| {
-						view.show(ui, state);
-					},
-				);
-				output.drop_without_applying_deltas();
-			}
-		};
-		click(&ctx, &mut view, &mut state, close.center());
-		assert!(banner(&scan(&ctx, &mut view, &mut state).0).is_none());
-		assert!(!view.settings.open, "dismissing must not open settings");
-		// A finished download is a new prompt, so it speaks up again.
-		view.updates.ready = true;
-		let (text, _) = scan(&ctx, &mut view, &mut state);
-		assert!(
-			text.iter()
-				.any(|(label, rect)| label == "Restart to update" && rect.top() > 100.0)
-		);
 	}
 }

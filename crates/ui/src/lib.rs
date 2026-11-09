@@ -1483,69 +1483,8 @@ impl MessagingUi {
 							design::window_controls(ui);
 						}
 						ui.spacing_mut().item_spacing.x = 10.0;
-						if self.updates.available || self.updates.ready {
-							let (label, icon) = if self.updates.ready {
-								(
-									"updates-shows-update-banner-restart-to-update",
-									icons::Icon::Reload,
-								)
-							} else if self.updates.busy {
-								(
-									"updates-shows-update-banner-updating",
-									icons::Icon::Download,
-								)
-							} else {
-								(
-									"updates-shows-update-banner-update-available",
-									icons::Icon::Download,
-								)
-							};
-							let label = crate::i18n::translate(label);
-							let font = egui::FontId::new(12.0, design::medium_family(ui.ctx()));
-							let galley =
-								ui.painter()
-									.layout_no_wrap(label.clone(), font, colors.accent);
-							let icon_size = 13.0;
-							let gap = 5.0;
-							let pad = egui::vec2(6.0, 2.0);
-							let size = egui::vec2(
-								galley.size().x + icon_size + gap + pad.x * 2.0,
-								galley.size().y.max(icon_size) + pad.y * 2.0,
-							);
-							let (rect, response) =
-								ui.allocate_exact_size(size, egui::Sense::click());
-							ui.painter().rect_filled(
-								rect,
-								255,
-								colors.accent.gamma_multiply(if response.hovered() {
-									0.24
-								} else {
-									0.16
-								}),
-							);
-							let icon_rect = egui::Rect::from_center_size(
-								egui::pos2(rect.left() + pad.x + icon_size / 2.0, rect.center().y),
-								egui::Vec2::splat(icon_size),
-							);
-							icons::paint(ui.painter(), icon, icon_rect, colors.accent);
-							ui.painter().galley(
-								egui::pos2(
-									icon_rect.right() + gap,
-									rect.center().y - galley.size().y / 2.0,
-								),
-								galley,
-								colors.accent,
-							);
-							if response
-								.on_hover_text(crate::i18n::translate_if_key(&self.updates.status))
-								.clicked()
-							{
-								self.open_update_settings();
-							}
-						} else {
-							design::build_badge(ui, self.build);
-						}
-						if state.demo && !self.updates.available && !self.updates.ready {
+						design::build_badge(ui, self.build);
+						if state.demo {
 							egui::Frame::new()
 								.stroke(egui::Stroke::new(1.0, colors.border))
 								.corner_radius(10)
@@ -2219,16 +2158,11 @@ impl MessagingUi {
 					);
 					ui.painter().rect_filled(line, 0, colors.border);
 				};
-				if self.shows_update_banner() {
-					self.update_banner(ui);
-					divider(ui);
-				}
 				if !state.demo
 					&& state.auth == client_core::auth::AuthState::Authenticated
 					&& !state.gateway_connected
 				{
-					let first = !self.shows_update_banner();
-					self.reconnecting_banner(ui, first);
+					self.reconnecting_banner(ui, true);
 					divider(ui);
 				}
 				if in_call {

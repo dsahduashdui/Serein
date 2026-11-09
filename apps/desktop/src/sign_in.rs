@@ -539,12 +539,10 @@ impl Desktop {
 									.ui(ui, |ui| self.messaging.appearance_menu(ui));
 									ui.add_space(4.0);
 									let updates = &self.messaging.updates;
-									let (label, color) = if updates.ready {
-										("updates-shows-update-banner-restart-to-update", p.link)
-									} else if updates.busy {
+									// Update prompts stay inside the settings menu instead of nagging
+									// on the sign-in chrome.
+									let (label, color) = if updates.busy {
 										("updates-shows-update-banner-updating", p.muted)
-									} else if updates.available {
-										("updates-shows-update-banner-update-available", p.link)
 									} else {
 										("page-updates", p.muted)
 									};
